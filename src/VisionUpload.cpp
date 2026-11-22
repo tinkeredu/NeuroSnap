@@ -188,6 +188,15 @@ String sendBase64(HttpsPost &post, const uint8_t *jpeg, size_t length) {
     return "";
 }
 
+bool appendJsonString(String &body, const String &value) {
+    JsonDocument literal;
+    if (!literal.set(value)) return false;
+    // ArduinoJson clears an Arduino String destination before serializing.
+    String encoded;
+    serializeJson(literal, encoded);
+    return encoded.length() == measureJson(literal) && body.concat(encoded);
+}
+
 } // namespace
 
 String analyzePhoto(const VisionSettings &settings, const String &prompt,
@@ -204,19 +213,14 @@ String analyzePhoto(const VisionSettings &settings, const String &prompt,
     }
 
     // The dynamic JSON strings are escaped independently so the JPEG can be streamed into image_url.
-    String head = "{\"max_tokens\":320,\"model\":";
-    JsonDocument literal;
-    literal.set(settings.apiModel);
-    serializeJson(literal, head);
-    head += ",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":";
-    literal.set(prompt);
-    serializeJson(literal, head);
-    head += "},{\"type\":\"image_url\",\"image_url\":";
-    if (direct) {
-        head += "\"data:image/jpeg;base64,";
-    } else {
-        literal.set(imageUrl);
-        serializeJson(literal, head);
+    String head;
+    if (!head.concat("{\"max_tokens\":320,\"model\":") ||
+        !appendJsonString(head, settings.apiModel) ||
+        !head.concat(",\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":") ||
+        !appendJsonString(head, prompt) ||
+        !head.concat("},{\"type\":\"image_url\",\"image_url\":") ||
+        !(direct ? head.concat("\"data:image/jpeg;base64,") : appendJsonString(head, imageUrl))) {
+        return "Mistral: JSON-Anfrage konnte nicht erstellt werden";
     }
     const String tail = direct ? "\"}]}]}" : "}]}]}";
     const size_t imageLength = direct ? 4 * ((length + 2) / 3) : 0;
