@@ -129,7 +129,7 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
   <section>
     <div class="toolbar">
       <h2>Galerie</h2>
-      <button id="refresh" class="secondary" type="button">Aktualisieren</button>
+      <button id="loadPhotos" class="secondary" type="button">Bilder laden</button>
     </div>
     <div id="gallery" class="grid" aria-live="polite"></div>
   </section>
@@ -306,8 +306,7 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
       status(await response.text());
     });
   };
-  byId('refresh').onclick = () => run(byId('refresh'), loadGallery);
-  loadGallery().catch(error => status(error.message));
+  byId('loadPhotos').onclick = () => run(byId('loadPhotos'), loadGallery);
 </script>
 </body>
 </html>

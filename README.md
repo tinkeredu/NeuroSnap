@@ -10,7 +10,7 @@ Inspiriert vom [Digital Independence Day](https://di.day/) lässt sich der Über
 | Sofortbild mit KI | Eigener Text oben, Foto, Mistral-Text, eigener Text unten | An Mistral |
 | Nur KI-Text | Mistral-Text | An Mistral |
 
-In beiden Sofortbildmodi sind die Texte oben und unten optional. Ist die KI nicht erreichbar, druckt **Sofortbild mit KI** weiterhin das Foto und die eigenen Texte. Die Fotos und verfügbaren KI-Texte erscheinen in der lokalen Galerie, wenn eine SD-Karte eingelegt ist.
+In beiden Sofortbildmodi sind die Texte oben und unten optional. Ist die KI nicht erreichbar, druckt **Sofortbild mit KI** weiterhin das Foto und die eigenen Texte. Klicke in der lokalen Galerie auf **Bilder laden**, um Fotos und verfügbare KI-Texte von der SD-Karte abzurufen.
 
 Unter **Einstellungen → Druckrasterung** wählst du die Umwandlung in Schwarz und Weiß. **Bayer** verwendet ein regelmäßiges Punktraster und bleibt die Voreinstellung. **Floyd–Steinberg** erhält feine Grauabstufungen, **Atkinson** betont den Kontrast. **Schwellenwert** eignet sich für Text und Strichzeichnungen. Die Auswahl gilt ab der nächsten Aufnahme. Auf der SD-Karte stehen unter `photo_dither` die Werte `bayer`, `floyd_steinberg`, `atkinson` und `threshold` zur Verfügung.
 
