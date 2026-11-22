@@ -50,7 +50,8 @@ bool isCaptureName(const String &name, const char *extension) {
     return true;
 }
 
-void configureCameraWeb(CameraSettings &settings, bool sdReady, void (*openWifiPortal)()) {
+void configureCameraWeb(CameraSettings &settings, bool sdReady, const bool &captureActive,
+                        void (*openWifiPortal)()) {
     startWifiPortal = openWifiPortal;
     const char *headers[] = {REQUEST_HEADER};
     server.collectHeaders(headers, 1);
@@ -139,8 +140,11 @@ void configureCameraWeb(CameraSettings &settings, bool sdReady, void (*openWifiP
         server.send(200, TEXT, "Verbinde dich mit NeuroSnap_Setup (Passwort neurosnap) und öffne http://192.168.4.1.");
         wifiPortalAt = millis() + 500;
     });
-    server.on("/update", HTTP_POST, [&settings] {
+    server.on("/update", HTTP_POST, [&settings, &captureActive] {
         if (!authorize(settings, true)) return;
+        if (captureActive) {
+            return server.send(409, TEXT, "Warte mit dem Firmware-Update, bis die Aufnahme abgeschlossen ist.");
+        }
         const bool success = updateReady && Update.isRunning() && Update.end(true);
         updateReady = false;
         if (!success) {
@@ -149,8 +153,8 @@ void configureCameraWeb(CameraSettings &settings, bool sdReady, void (*openWifiP
         }
         server.send(200, TEXT, "Firmware aktualisiert. Die Kamera startet neu.");
         restartAt = millis() + 500;
-    }, [&settings] {
-        if (!isAuthorized(settings) || server.header(REQUEST_HEADER) != "1" || restartAt) return;
+    }, [&settings, &captureActive] {
+        if (!isAuthorized(settings) || server.header(REQUEST_HEADER) != "1" || restartAt || captureActive) return;
         HTTPUpload &upload = server.upload();
         switch (upload.status) {
             case UPLOAD_FILE_START:
@@ -174,6 +178,10 @@ void configureCameraWeb(CameraSettings &settings, bool sdReady, void (*openWifiP
                 break;
         }
     });
+}
+
+bool cameraWebRestartPending() {
+    return restartAt != 0;
 }
 
 void beginCameraWeb() {

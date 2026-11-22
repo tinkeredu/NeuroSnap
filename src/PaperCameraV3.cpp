@@ -5,6 +5,9 @@
 #include <WiFiManager.h>
 #include <esp_camera.h>
 #include <esp_system.h>
+#include <atomic>
+#include <memory>
+#include <new>
 
 #include "CameraSettings.h"
 #include "CameraWeb.h"
@@ -31,6 +34,21 @@ bool connectingAtBoot = true;
 bool webRunning = false;
 unsigned long connectionStarted;
 uint32_t nextPhotoNumber = 0;
+bool captureActive = false;
+String pendingIpReceipt;
+
+struct CaptureJob {
+    camera_fb_t *frame = nullptr;
+    CaptureMode mode;
+    PhotoProtocol protocol;
+    PhotoDither dither;
+    VisionSettings vision;
+    String name, header, footer, prompt, answer, error;
+    String uploadDiagnostics;
+    bool photoReady = true;
+};
+
+std::atomic<CaptureJob *> finishedCapture{nullptr};
 
 void setStatus(uint8_t red, uint8_t green, uint8_t blue) {
     pixels.setPixelColor(0, pixels.Color(red, green, blue));
@@ -40,6 +58,7 @@ void setStatus(uint8_t red, uint8_t green, uint8_t blue) {
 void readyStatus() {
     if (!cameraReady) setStatus(255, 0, 0);
     else if (wifiManager.getConfigPortalActive()) setStatus(0, 255, 255);
+    else if (captureActive) setStatus(255, 255, 0);
     else setStatus(0, 0, 255);
 }
 
@@ -102,10 +121,11 @@ String savePhoto(const camera_fb_t &frame) {
     return name;
 }
 
-void saveCaption(const String &name, const String &answer) {
-    if (!name.length()) return;
+void saveCaption(const String &name, const String &prompt, const String &answer) {
+    // The gallery may have deleted the JPEG while Mistral was processing it.
+    if (!name.length() || !SD_MMC.exists(name + ".jpg")) return;
     const String path = name + ".txt";
-    const String content = "PROMPT: " + settings.prompt + "\n----------------\nAI:\n" + answer;
+    const String content = "PROMPT: " + prompt + "\n----------------\nAI:\n" + answer;
     File file = SD_MMC.open(path, FILE_WRITE);
     if (!file || file.print(content) != content.length()) {
         file.close();
@@ -114,8 +134,62 @@ void saveCaption(const String &name, const String &answer) {
     }
 }
 
+void processCapture(CaptureJob &job) {
+    const bool printPhoto = job.mode != CaptureMode::AiText;
+    const bool useAi = job.mode != CaptureMode::Photo;
+    PhotoRaster raster;
+    if (printPhoto) {
+        job.photoReady = rasterizePhoto(job.frame->buf, job.frame->len, job.dither, raster);
+    }
+    if (useAi) {
+        job.uploadDiagnostics = "Vor KI-Upload: JPEG " + String(job.frame->len) +
+                                " Bytes, freier Heap " + String(ESP.getFreeHeap()) +
+                                ", groesster Heap-Block " + String(ESP.getMaxAllocHeap()) +
+                                ", freier PSRAM " + String(ESP.getFreePsram());
+        job.error = analyzePhoto(job.vision, job.prompt, job.frame->buf, job.frame->len, job.answer);
+    }
+    esp_camera_fb_return(job.frame);
+
+    if (printPhoto) {
+        printText(printer, job.header);
+        if (job.photoReady) {
+            if (job.protocol == PhotoProtocol::EscPos) {
+                printer.timeoutWait();
+                printEscPosRaster(printerSerial, raster);
+            } else {
+                printer.printBitmap(raster.width, raster.height, raster.data, false);
+            }
+        } else {
+            printer.println(F("Fotodruck fehlgeschlagen."));
+        }
+    }
+    if (job.answer.length()) {
+        if (printPhoto) printer.feed(1);
+        printer.boldOn();
+        printer.println(F("Mistral AI:"));
+        printer.boldOff();
+        printText(printer, job.answer);
+    } else if (useAi && !printPhoto) {
+        printText(printer, job.error);
+    }
+    if (printPhoto && job.footer.length()) {
+        printer.feed(1);
+        printText(printer, job.footer);
+    }
+    printer.feed(3);
+    printer.timeoutWait();
+    printerSerial.flush();
+}
+
+void captureTask(void *context) {
+    auto *job = static_cast<CaptureJob *>(context);
+    processCapture(*job);
+    finishedCapture.store(job);
+    vTaskDelete(nullptr);
+}
+
 void capturePhoto() {
-    if (!cameraReady) return;
+    if (!cameraReady || captureActive || cameraWebRestartPending()) return;
     setStatus(255, 255, 0);
     // With one buffer, the queued frame may predate the button press.
     if (camera_fb_t *queued = esp_camera_fb_get()) esp_camera_fb_return(queued);
@@ -125,56 +199,46 @@ void capturePhoto() {
         setStatus(255, 0, 0);
         return;
     }
-
     const String name = savePhoto(*frame);
-    const bool printPhoto = settings.mode != CaptureMode::AiText;
-    const bool useAi = settings.mode != CaptureMode::Photo;
-    PhotoRaster raster;
-    const bool photoReady = !printPhoto || rasterizePhoto(frame->buf, frame->len, raster);
-    String answer;
-    String error;
-    if (useAi) {
-        sysLog("Vor KI-Upload: JPEG " + String(frame->len) + " Bytes, freier Heap " +
-               String(ESP.getFreeHeap()) + ", groesster Heap-Block " +
-               String(ESP.getMaxAllocHeap()) + ", freier PSRAM " + String(ESP.getFreePsram()));
-        error = analyzePhoto(settings.vision, settings.prompt, frame->buf, frame->len, answer);
-        if (error.length()) sysLog(error);
-        else saveCaption(name, answer);
+    auto *job = new (std::nothrow) CaptureJob;
+    if (job) {
+        job->frame = frame;
+        job->name = name;
+        job->mode = settings.mode;
+        job->protocol = settings.photoProtocol;
+        job->dither = settings.photoDither;
+        job->header = settings.header;
+        job->footer = settings.footer;
+        if (job->mode != CaptureMode::Photo) {
+            job->vision = settings.vision;
+            job->prompt = settings.prompt;
+        }
+        captureActive = true;
+        // The printer library polls in yield() loops. Keep that work off the Wi-Fi core.
+        if (xTaskCreatePinnedToCore(captureTask, "capture", 8192, job, 1, nullptr,
+                                    ARDUINO_RUNNING_CORE) == pdPASS) return;
+        delete job;
+        captureActive = false;
     }
     esp_camera_fb_return(frame);
+    sysLog("Nicht genug Speicher fuer die Verarbeitung der Aufnahme.");
+    setStatus(255, 0, 0);
+}
 
-    if (printPhoto) {
-        printText(printer, settings.header);
-        if (photoReady) {
-            if (settings.photoProtocol == PhotoProtocol::EscPos) {
-                printer.timeoutWait();
-                printEscPosRaster(printerSerial, raster);
-            } else {
-                printer.printBitmap(raster.width, raster.height, raster.data, false);
-            }
-        } else {
-            sysLog("JPEG konnte nicht fuer den Druck aufbereitet werden.");
-            printer.println(F("Fotodruck fehlgeschlagen."));
-        }
-    }
-    if (answer.length()) {
-        if (printPhoto) printer.feed(1);
-        printer.boldOn();
-        printer.println(F("Mistral AI:"));
-        printer.boldOff();
-        printText(printer, answer);
-    } else if (useAi && !printPhoto) {
-        printText(printer, error);
-    }
-    if (printPhoto && settings.footer.length()) {
-        printer.feed(1);
-        printText(printer, settings.footer);
-    }
-    printer.feed(3);
+void serviceCapture() {
+    std::unique_ptr<CaptureJob> job(finishedCapture.exchange(nullptr));
+    if (!job) return;
+    captureActive = false;
+    if (job->uploadDiagnostics.length()) sysLog(job->uploadDiagnostics);
+    if (job->error.length()) sysLog(job->error);
+    else if (job->mode != CaptureMode::Photo) saveCaption(job->name, job->prompt, job->answer);
 
-    if (!photoReady) setStatus(255, 0, 0);
-    else if (error.length()) setStatus(255, 69, 0);
+    if (!job->photoReady) {
+        sysLog("JPEG konnte nicht fuer den Druck aufbereitet werden.");
+        setStatus(255, 0, 0);
+    } else if (job->error.length()) setStatus(255, 69, 0);
     else readyStatus();
+    sysLog("Verarbeitung der Aufnahme beendet.");
 }
 
 void uploadGallery() {
@@ -238,6 +302,12 @@ void serviceWifi() {
         if (!wifiManager.getConfigPortalActive()) readyStatus();
     }
     const bool online = WiFi.status() == WL_CONNECTED;
+    if (!online && webRunning) {
+        stopCameraWeb();
+        webRunning = false;
+        pendingIpReceipt = "";
+        sysLog("WLAN-Verbindung verloren.");
+    }
     // WebServer opens an lwIP socket. Wait for station bring-up and leave port 80 to the portal.
     if (online && !wifiManager.getConfigPortalActive() && !webRunning) {
         sysLog("Starte Webserver.");
@@ -248,11 +318,14 @@ void serviceWifi() {
         connectingAtBoot = false;
         WiFi.setSleep(false);
         configTime(0, 0, "pool.ntp.org", "time.cloudflare.com");
-        const String ip = WiFi.localIP().toString();
-        sysLog("Weboberflaeche: http://" + ip);
+        pendingIpReceipt = WiFi.localIP().toString();
+        sysLog("Weboberflaeche: http://" + pendingIpReceipt);
+    }
+    if (webRunning && !captureActive && pendingIpReceipt.length()) {
         printer.println(F("IP-Adresse:"));
-        printText(printer, ip);
+        printText(printer, pendingIpReceipt);
         printer.feed(1);
+        pendingIpReceipt = "";
     }
     connected = online;
     if (connectingAtBoot && millis() - connectionStarted >= 12000) openWifiPortal();
@@ -278,7 +351,7 @@ void serviceButton() {
     const unsigned long duration = now - pressedAt;
     if (duration < 2000) capturePhoto();
     else if (duration >= 10000) openWifiPortal();
-    else if (duration >= 5000) uploadGallery();
+    else if (duration >= 5000 && !captureActive) uploadGallery();
 }
 
 } // namespace
@@ -303,7 +376,7 @@ void setup() {
     sysLog("NeuroSnap Start, ESP32-Resetgrund: " + String(static_cast<int>(resetReason)));
     sysLog("Initialisiere Kamera.");
     cameraReady = initCamera();
-    configureCameraWeb(settings, sdReady, openWifiPortal);
+    configureCameraWeb(settings, sdReady, captureActive, openWifiPortal);
 
     wifiManager.setDebugOutput(false);
     wifiManager.setConfigPortalBlocking(false);
@@ -331,6 +404,7 @@ void setup() {
 }
 
 void loop() {
+    serviceCapture();
     serviceWifi();
     if (webRunning) serviceCameraWeb();
     serviceButton();

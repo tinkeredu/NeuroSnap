@@ -2,34 +2,62 @@
 
 #include <TJpg_Decoder.h>
 #include <esp_heap_caps.h>
+#include <memory>
+#include <new>
 
 namespace {
 
-// TJpg_Decoder calls back synchronously with small RGB565 tiles.
-PhotoRaster *raster = nullptr;
-uint16_t decodedWidth;
-uint16_t decodedHeight;
+struct Rasterizer {
+    PhotoRaster &photo;
+    PhotoDither method;
+    const uint16_t decodedWidth;
+    const uint16_t decodedHeight;
+    DitherRows dither;
+    int firstRow = 0;
+    int endRow = 0;
+    // TJpg_Decoder emits MCU bands in row order, at most 16 rows high.
+    static constexpr int bandHeight = 16;
+    uint8_t gray[bandHeight][PHOTO_PRINT_WIDTH];
+
+    Rasterizer(PhotoRaster &photo, PhotoDither method, uint16_t width, uint16_t height)
+        : photo(photo), method(method), decodedWidth(width), decodedHeight(height) {}
+
+    void finishBand() {
+        const size_t stride = (photo.width + 7) / 8;
+        for (int row = firstRow; row < endRow; ++row) {
+            dither.write(method, gray[row - firstRow], photo.data + row * stride, photo.width, row);
+        }
+    }
+};
+
+// TJpg_Decoder calls back synchronously and does not accept a context pointer.
+Rasterizer *rasterizer = nullptr;
 
 bool copyTile(int16_t x, int16_t y, uint16_t width, uint16_t height, uint16_t *pixels) {
-    static constexpr uint8_t bayer[4][4] = {
-        {0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}
-    };
-    const uint16_t stride = (raster->width + 7) / 8;
+    Rasterizer &r = *rasterizer;
+    const PhotoRaster &photo = r.photo;
     // Invert the nearest-neighbor mapping to find the output area of this tile.
-    const int left = (x * raster->width + decodedWidth - 1) / decodedWidth;
-    const int right = ((x + width) * raster->width + decodedWidth - 1) / decodedWidth;
-    const int top = (y * raster->height + decodedHeight - 1) / decodedHeight;
-    const int bottom = ((y + height) * raster->height + decodedHeight - 1) / decodedHeight;
+    const int left = (x * photo.width + r.decodedWidth - 1) / r.decodedWidth;
+    const int right = ((x + width) * photo.width + r.decodedWidth - 1) / r.decodedWidth;
+    const int top = (y * photo.height + r.decodedHeight - 1) / r.decodedHeight;
+    const int bottom = ((y + height) * photo.height + r.decodedHeight - 1) / r.decodedHeight;
+    if (bottom - top > Rasterizer::bandHeight) return false;
+    if (top != r.firstRow) {
+        r.finishBand();
+        r.firstRow = top;
+    }
+    r.endRow = bottom;
     for (int row = top; row < bottom; ++row) {
-        const uint16_t *source = pixels + (row * decodedHeight / raster->height - y) * width;
-        uint8_t *output = raster->data + row * stride;
+        const uint16_t *source = pixels + (row * r.decodedHeight / photo.height - y) * width;
+        uint8_t *output = r.gray[row - top];
         for (int col = left; col < right; ++col) {
-            const uint16_t rgb = source[col * decodedWidth / raster->width - x];
-            const int gray = ((rgb >> 11) * 8 * 77 + ((rgb >> 5) & 63) * 4 * 150 +
-                              (rgb & 31) * 8 * 29) >> 8;
-            if (gray < bayer[row % 4][col % 4] * 16 + 8) {
-                output[col / 8] |= 0x80 >> (col % 8);
-            }
+            const uint16_t rgb = source[col * r.decodedWidth / photo.width - x];
+            const int red = rgb >> 11;
+            const int green = (rgb >> 5) & 63;
+            const int blue = rgb & 31;
+            output[col] = (((red << 3) | (red >> 2)) * 77 +
+                           ((green << 2) | (green >> 4)) * 150 +
+                           ((blue << 3) | (blue >> 2)) * 29) >> 8;
         }
     }
     return true;
@@ -37,7 +65,7 @@ bool copyTile(int16_t x, int16_t y, uint16_t width, uint16_t height, uint16_t *p
 
 } // namespace
 
-bool rasterizePhoto(const uint8_t *jpeg, size_t length, PhotoRaster &photo) {
+bool rasterizePhoto(const uint8_t *jpeg, size_t length, PhotoDither method, PhotoRaster &photo) {
     uint16_t width = 0;
     uint16_t height = 0;
     if (TJpgDec.getJpgSize(&width, &height, jpeg, length) != JDR_OK || !width || !height) {
@@ -61,12 +89,14 @@ bool rasterizePhoto(const uint8_t *jpeg, size_t length, PhotoRaster &photo) {
     }
     TJpgDec.setJpgScale(scale);
     TJpgDec.setCallback(copyTile);
-    decodedWidth = width / scale;
-    decodedHeight = height / scale;
-    raster = &photo;
+    std::unique_ptr<Rasterizer> work(new (std::nothrow) Rasterizer(photo, method, width / scale, height / scale));
+    if (!work) return false;
+    rasterizer = work.get();
     const JRESULT result = TJpgDec.drawJpg(0, 0, jpeg, length);
-    raster = nullptr;
-    return result == JDR_OK;
+    rasterizer = nullptr;
+    if (result != JDR_OK) return false;
+    work->finishBand();
+    return true;
 }
 
 void printEscPosRaster(HardwareSerial &serial, const PhotoRaster &photo) {
