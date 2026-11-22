@@ -158,9 +158,8 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
   const form = byId('settingsForm');
   const fields = form.elements;
   const settingNames = [
-    'photo_resolution',
     'mode', 'header', 'footer', 'photo_dither', 'photo_protocol', 'prompt', 'transfer', 'api_url', 'api_model',
-    'upload_host', 'upload_path', 'dropoff_path', 'logging_enabled', 'guided_mode'
+    'upload_host', 'upload_path', 'dropoff_path', 'logging_enabled', 'guided_mode', 'photo_resolution'
   ];
   let auth = '';
 
