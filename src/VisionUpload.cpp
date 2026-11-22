@@ -5,6 +5,7 @@
 #include <esp_http_client.h>
 #include <esp_tls.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/ssl.h>
 #include <time.h>
 #include <cerrno>
 #include <memory>
@@ -18,6 +19,7 @@ namespace {
 
 // Fit a TLS record in the ESP32's 5760-byte TCP send buffer.
 constexpr size_t UPLOAD_BLOCK = 4096;
+static_assert(UPLOAD_BLOCK <= MBEDTLS_SSL_OUT_CONTENT_LEN, "Upload writes must fit a TLS record");
 constexpr size_t BASE64_INPUT_BLOCK = (UPLOAD_BLOCK / 4) * 3; // Padding only in the final block.
 
 class HttpsPost {
@@ -70,13 +72,25 @@ public:
 
     bool write(const uint8_t *data, size_t length) {
         while (length) {
+            // Limit each call to one TLS record so no earlier record in the call can be lost from the byte count.
+            const auto *buffer = reinterpret_cast<const char *>(data);
+            const size_t count = min(length, UPLOAD_BLOCK);
             errno = 0;
-            const int sent = esp_http_client_write(handle, reinterpret_cast<const char *>(data), length);
+            int sent = esp_http_client_write(handle, buffer, count);
+            if (sent == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                // mbedTLS may still have this record pending and requires identical arguments.
+                ++writeRetries;
+                errno = 0;
+                sent = esp_http_client_write(handle, buffer, count);
+            }
             if (sent <= 0) {
                 const int writeErrno = errno;
                 socketError = esp_http_client_get_errno(handle);
                 if (socketError <= 0) socketError = writeErrno;
                 writeResult = sent;
+                // The failed call may have transmitted up to count more bytes.
+                retryableReset = sent < 0 && socketError == ECONNRESET &&
+                                 bytesWritten + count < bodyLength;
                 return false;
             }
             bytesWritten += sent;
@@ -115,8 +129,11 @@ public:
         if (localWriteError) return String(service) + ": " + localWriteError;
         return String(service) + ": Upload unvollstaendig (HTTP-Body " +
                String(bytesWritten) + "/" + String(bodyLength) + " Bytes" +
-               ", Schreibcode " + String(writeResult) + ", errno " + String(socketError) + ")";
+               ", Schreibcode " + String(writeResult) + ", errno " + String(socketError) +
+               ", Schreibwiederholungen " + String(writeRetries) + ")";
     }
+
+    bool canRetryAfterReset() const { return retryableReset; }
 
     String readResponse(const char *service, String &body, size_t limit) {
         if (esp_http_client_fetch_headers(handle) < 0) {
@@ -158,8 +175,10 @@ private:
     int tlsCertFlags = 0;
     size_t bodyLength = 0;
     size_t bytesWritten = 0;
+    size_t writeRetries = 0;
     int writeResult = 0;
     int socketError = 0;
+    bool retryableReset = false;
     const char *localWriteError = nullptr;
 };
 
@@ -213,6 +232,17 @@ String sendBase64(HttpsPost &post, const uint8_t *jpeg, size_t length) {
     return "";
 }
 
+String sendMistralBody(HttpsPost &post, const String &head, const String &tail,
+                       const uint8_t *jpeg, size_t length) {
+    if (!post.write(head)) return post.uploadError("Mistral");
+    if (length) {
+        const String error = sendBase64(post, jpeg, length);
+        if (error.length()) return error;
+    }
+    if (!post.write(tail)) return post.uploadError("Mistral");
+    return "";
+}
+
 bool appendJsonString(String &body, const String &value) {
     JsonDocument literal;
     if (!literal.set(value)) return false;
@@ -248,19 +278,22 @@ String analyzePhoto(const VisionSettings &settings, const String &prompt,
         return "Mistral: JSON-Anfrage konnte nicht erstellt werden";
     }
     const String tail = direct ? "\"}]}]}" : "}]}]}";
-    const size_t imageLength = direct ? 4 * ((length + 2) / 3) : 0;
+    const size_t jpegLength = direct ? length : 0;
+    const size_t requestLength = head.length() + 4 * ((jpegLength + 2) / 3) + tail.length();
 
-    HttpsPost post(settings.apiUrl, "application/json", 60000, settings.apiKey);
-    if (!post.open(head.length() + imageLength + tail.length())) return post.openError("Mistral");
-    if (!post.write(head)) return post.uploadError("Mistral");
-    if (direct) {
-        const String error = sendBase64(post, jpeg, length);
-        if (error.length()) return error;
-    }
-    if (!post.write(tail)) return post.uploadError("Mistral");
     String body;
-    const String error = post.readResponse("Mistral", body, 16384);
-    if (error.length()) return error;
+    for (bool retry = true; ; retry = false) {
+        HttpsPost post(settings.apiUrl, "application/json", 60000, settings.apiKey);
+        if (!post.open(requestLength)) return post.openError("Mistral");
+        const String sendError = sendMistralBody(post, head, tail, jpeg, jpegLength);
+        if (sendError.length()) {
+            if (retry && post.canRetryAfterReset()) continue;
+            return sendError;
+        }
+        const String responseError = post.readResponse("Mistral", body, 16384);
+        if (responseError.length()) return responseError;
+        break;
+    }
 
     JsonDocument response;
     JsonDocument filter;
