@@ -76,7 +76,7 @@ Die LED leuchtet blau im Bereitschaftszustand, gelb beim Verarbeiten einer Aufna
 
 Wenn der Startbeleg lesbar ist, beim Foto aber Sonderzeichen erscheinen, prüfe unter **Einstellungen → Fotodruck-Protokoll** das Bildkommando deines Druckers. Standard ist **ESC/POS (GS v 0)**. Für Drucker mit **Adafruit (DC2 *)** wähle diese Option und speichere. Auf der SD-Karte entspricht das `"photo_protocol": "esc_pos"` bzw. `"photo_protocol": "adafruit"` in `settings.json`. Teste mit einer Aufnahme im Modus **Sofortbild**. Wenn auch der Startbeleg unlesbar ist, prüfe die serielle Verbindung und die Baudrate am Drucker. Bei Abbrüchen während des Druckens prüfe die Stromversorgung.
 
-Kommt die Kamera direkt nach dem WLAN-Start noch nicht per HTTPS ins Netz, warte auf die Zeitsynchronisierung und löse erneut aus. Die Weboberfläche bleibt während der Bildaufbereitung, der Mistral-Anfrage und des Ausdrucks erreichbar. Während eines manuellen Galerie-Uploads kann sie kurz pausieren.
+Kommt die Kamera direkt nach dem WLAN-Start noch nicht per HTTPS ins Netz, warte auf die Zeitsynchronisierung und löse erneut aus. Bei einem HTTPS-Verbindungsfehler gibt das Systemprotokoll verfügbare Transport- und Socketfehler sowie TLS- und Zertifikatsdetails aus. Die Weboberfläche bleibt während der Bildaufbereitung, der Mistral-Anfrage und des Ausdrucks erreichbar. Während eines manuellen Galerie-Uploads kann sie kurz pausieren.
 
 Falls sich der Startbeleg wiederholt, verbinde die Kamera per USB und öffne `pio device monitor -b 115200`. Die Zeile `NeuroSnap Start, ESP32-Resetgrund` und die zuletzt protokollierte Startphase helfen, den Neustart einzugrenzen. Bei aktiviertem SD-Logging stehen die Startmeldungen auch in `system.log`.
 
