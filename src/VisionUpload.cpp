@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <esp_http_client.h>
+#include <esp_tls.h>
 #include <mbedtls/base64.h>
 #include <time.h>
 #include <cerrno>
@@ -28,6 +29,8 @@ public:
         config.method = HTTP_METHOD_POST;
         config.timeout_ms = timeoutMs;
         config.crt_bundle_attach = esp_crt_bundle_attach;
+        config.event_handler = onHttpEvent;
+        config.user_data = this;
         handle = esp_http_client_init(&config);
         if (handle) {
             esp_http_client_set_header(handle, "Connection", "close");
@@ -46,14 +49,23 @@ public:
     bool open(size_t length) {
         bodyLength = length;
         if (!handle) return false;
+        errno = 0;
         openResult = esp_http_client_open(handle, length);
-        return openResult == ESP_OK;
+        if (openResult == ESP_OK) return true;
+        const int openErrno = errno;
+        socketError = esp_http_client_get_errno(handle);
+        if (socketError <= 0) socketError = openErrno;
+        return false;
     }
 
     String openError(const char *service) const {
         if (!handle) return String(service) + ": HTTPS-Client konnte nicht initialisiert werden";
-        return String(service) + ": HTTPS-Verbindung fehlgeschlagen (" +
-               esp_err_to_name(openResult) + ")";
+        String error = String(service) + ": HTTPS-Verbindung fehlgeschlagen (" + esp_err_to_name(openResult);
+        if (tlsResult != ESP_OK) error += String(", Transport ") + esp_err_to_name(tlsResult);
+        if (tlsCode) error += ", mbedTLS 0x" + String(tlsCode, HEX);
+        if (tlsCertFlags) error += ", Zertifikatsflags 0x" + String(tlsCertFlags, HEX);
+        if (socketError) error += ", errno " + String(socketError);
+        return error + ")";
     }
 
     bool write(const uint8_t *data, size_t length) {
@@ -129,8 +141,21 @@ public:
     }
 
 private:
+    static esp_err_t onHttpEvent(esp_http_client_event_t *event) {
+        // ESP-IDF 4.4 passes the transport's TLS error handle in this event.
+        if (event->event_id == HTTP_EVENT_ERROR && event->data) {
+            auto &post = *static_cast<HttpsPost *>(event->user_data);
+            post.tlsResult = esp_tls_get_and_clear_last_error(
+                static_cast<esp_tls_error_handle_t>(event->data), &post.tlsCode, &post.tlsCertFlags);
+        }
+        return ESP_OK;
+    }
+
     esp_http_client_handle_t handle = nullptr;
     esp_err_t openResult = ESP_OK;
+    esp_err_t tlsResult = ESP_OK;
+    int tlsCode = 0;
+    int tlsCertFlags = 0;
     size_t bodyLength = 0;
     size_t bytesWritten = 0;
     int writeResult = 0;
