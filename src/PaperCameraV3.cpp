@@ -418,7 +418,7 @@ void setup() {
 void loop() {
     serviceCapture();
     serviceWifi();
-    if (webRunning) serviceCameraWeb();
+    serviceCameraWeb(webRunning);
     serviceButton();
     delay(5);
 }

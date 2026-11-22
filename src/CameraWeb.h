@@ -7,5 +7,5 @@ void configureCameraWeb(CameraSettings &settings, bool sdReady, const bool &capt
                         void (*openWifiPortal)());
 bool cameraWebRestartPending();
 void beginCameraWeb();
-void serviceCameraWeb();
+void serviceCameraWeb(bool listening);
 void stopCameraWeb();

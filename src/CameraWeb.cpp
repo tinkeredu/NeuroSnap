@@ -188,9 +188,11 @@ void beginCameraWeb() {
     server.begin();
 }
 
-void serviceCameraWeb() {
-    server.handleClient();
+void serviceCameraWeb(bool listening) {
     if (restartAt && int32_t(millis() - restartAt) >= 0) ESP.restart();
+    if (!listening) return;
+
+    server.handleClient();
     if (wifiPortalAt && int32_t(millis() - wifiPortalAt) >= 0) {
         wifiPortalAt = 0;
         startWifiPortal();
