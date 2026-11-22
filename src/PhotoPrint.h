@@ -17,4 +17,5 @@ struct PhotoRaster {
 };
 
 bool rasterizePhoto(const uint8_t *jpeg, size_t length, PhotoRaster &photo);
+void printEscPosRaster(HardwareSerial &serial, const PhotoRaster &photo);
 void printText(Adafruit_Thermal &printer, String text);

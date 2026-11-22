@@ -97,6 +97,12 @@ String CameraSettings::applyJson(JsonVariantConst json) {
         else if (value == "photo_ai") mode = CaptureMode::PhotoAi;
         else return "Unbekannter Aufnahmemodus.";
     }
+    if (!json["photo_protocol"].isUnbound()) {
+        const String value = json["photo_protocol"] | "";
+        if (value == "esc_pos") photoProtocol = PhotoProtocol::EscPos;
+        else if (value == "adafruit") photoProtocol = PhotoProtocol::Adafruit;
+        else return "Unbekanntes Fotodruck-Protokoll.";
+    }
     if (!json["transfer"].isUnbound()) {
         const String value = json["transfer"] | "";
         if (value == "direct") vision.transfer = ImageTransfer::Direct;
@@ -117,6 +123,7 @@ void CameraSettings::toJson(JsonDocument &doc, bool includeSecrets) const {
     doc["prompt"] = prompt;
     doc["header"] = header;
     doc["footer"] = footer;
+    doc["photo_protocol"] = photoProtocol == PhotoProtocol::EscPos ? "esc_pos" : "adafruit";
     doc["api_url"] = vision.apiUrl;
     doc["api_model"] = vision.apiModel;
     doc["transfer"] = vision.transfer == ImageTransfer::Direct ? "direct" : "dropoff";

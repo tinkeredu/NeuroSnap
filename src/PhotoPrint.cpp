@@ -69,6 +69,25 @@ bool rasterizePhoto(const uint8_t *jpeg, size_t length, PhotoRaster &photo) {
     return result == JDR_OK;
 }
 
+void printEscPosRaster(HardwareSerial &serial, const PhotoRaster &photo) {
+    const uint16_t stride = (photo.width + 7) / 8;
+    // A full-width block including its header fits in a 256-byte receive buffer.
+    constexpr uint16_t rowsPerBlock = 4;
+    constexpr unsigned printTimePerRowMs = 30;
+    for (uint16_t row = 0; row < photo.height; row += rowsPerBlock) {
+        const uint16_t rows = min(rowsPerBlock, uint16_t(photo.height - row));
+        const uint8_t command[] = {
+            0x1d, 'v', '0', 0,
+            uint8_t(stride), uint8_t(stride >> 8), uint8_t(rows), uint8_t(rows >> 8)
+        };
+        serial.write(command, sizeof(command));
+        serial.write(photo.data + size_t(row) * stride, size_t(rows) * stride);
+        // Wait for transmission, then allow the printer to finish the block.
+        serial.flush();
+        delay(rows * printTimePerRowMs);
+    }
+}
+
 void printText(Adafruit_Thermal &printer, String text) {
     if (!text.length()) return;
     text.replace("Ä", "Ae"); text.replace("ä", "ae");

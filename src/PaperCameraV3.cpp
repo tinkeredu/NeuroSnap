@@ -146,7 +146,12 @@ void capturePhoto() {
     if (printPhoto) {
         printText(printer, settings.header);
         if (photoReady) {
-            printer.printBitmap(raster.width, raster.height, raster.data, false);
+            if (settings.photoProtocol == PhotoProtocol::EscPos) {
+                printer.timeoutWait();
+                printEscPosRaster(printerSerial, raster);
+            } else {
+                printer.printBitmap(raster.width, raster.height, raster.data, false);
+            }
         } else {
             sysLog("JPEG konnte nicht fuer den Druck aufbereitet werden.");
             printer.println(F("Fotodruck fehlgeschlagen."));

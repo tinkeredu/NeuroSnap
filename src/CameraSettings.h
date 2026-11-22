@@ -4,10 +4,12 @@
 #include <ArduinoJson.h>
 
 enum class CaptureMode { AiText, Photo, PhotoAi };
+enum class PhotoProtocol { EscPos, Adafruit };
 
 struct CameraSettings {
     VisionSettings vision;
     CaptureMode mode = CaptureMode::AiText;
+    PhotoProtocol photoProtocol = PhotoProtocol::EscPos;
     String prompt = "Beschreibe dieses Bild.";
     String header;
     String footer;
