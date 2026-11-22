@@ -72,7 +72,9 @@ Beim ersten Speichern im Browser entsteht `settings.json` im Hauptverzeichnis de
 
 Die LED leuchtet blau im Bereitschaftszustand, gelb beim Verarbeiten einer Aufnahme, cyan während der WLAN-Einrichtung und lila beim Galerie-Upload. Bei Orange findest du den Netzwerk- oder KI-Fehler auf der seriellen Konsole oder bei aktiviertem SD-Logging im Systemprotokoll. Für die Diagnose protokolliert die Firmware vor der KI-Anfrage die JPEG-Größe, den freien Heap, den größten zusammenhängenden Heap-Block und den freien PSRAM. Rot signalisiert einen Aufnahme- oder Fotodruckfehler.
 
-Bei fehlgeschlagenem Fotodruck prüfe die Stromversorgung und die Druckerkompatibilität. Kommt die Kamera direkt nach dem WLAN-Start noch nicht per HTTPS ins Netz, warte auf die Zeitsynchronisierung und löse erneut aus. Die Weboberfläche antwortet nach Abschluss eines laufenden Drucks oder Uploads wieder.
+Wenn der Startbeleg lesbar ist, beim Foto aber Sonderzeichen erscheinen, prüfe unter **Einstellungen → Fotodruck-Protokoll** das Bildkommando deines Druckers. Standard ist **ESC/POS (GS v 0)**. Für Drucker mit **Adafruit (DC2 *)** wähle diese Option und speichere. Auf der SD-Karte entspricht das `"photo_protocol": "esc_pos"` bzw. `"photo_protocol": "adafruit"` in `settings.json`. Teste mit einer Aufnahme im Modus **Sofortbild**. Wenn auch der Startbeleg unlesbar ist, prüfe die serielle Verbindung und die Baudrate am Drucker. Bei Abbrüchen während des Druckens prüfe die Stromversorgung.
+
+Kommt die Kamera direkt nach dem WLAN-Start noch nicht per HTTPS ins Netz, warte auf die Zeitsynchronisierung und löse erneut aus. Die Weboberfläche antwortet nach Abschluss eines laufenden Drucks oder Uploads wieder.
 
 Falls sich der Startbeleg wiederholt, verbinde die Kamera per USB und öffne `pio device monitor -b 115200`. Die Zeile `NeuroSnap Start, ESP32-Resetgrund` und die zuletzt protokollierte Startphase helfen, den Neustart einzugrenzen. Bei aktiviertem SD-Logging stehen die Startmeldungen auch in `system.log`.
 

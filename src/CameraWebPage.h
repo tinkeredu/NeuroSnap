@@ -58,6 +58,12 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
       <div id="printTexts">
         <label>Text über dem Foto <textarea name="header" rows="2" maxlength="512"></textarea></label>
         <label>Text unter dem Foto <textarea name="footer" rows="2" maxlength="512"></textarea></label>
+        <label>Fotodruck-Protokoll
+          <select name="photo_protocol">
+            <option value="esc_pos">ESC/POS (GS v 0)</option>
+            <option value="adafruit">Adafruit (DC2 *)</option>
+          </select>
+        </label>
       </div>
       <fieldset id="visionFields">
         <legend>Mistral</legend>
@@ -134,7 +140,7 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
   const form = byId('settingsForm');
   const fields = form.elements;
   const settingNames = [
-    'mode', 'header', 'footer', 'prompt', 'transfer', 'api_url', 'api_model',
+    'mode', 'header', 'footer', 'photo_protocol', 'prompt', 'transfer', 'api_url', 'api_model',
     'upload_host', 'upload_path', 'dropoff_path', 'logging_enabled', 'guided_mode'
   ];
   let auth = '';
