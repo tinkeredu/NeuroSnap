@@ -76,6 +76,10 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
       <fieldset id="visionFields">
         <legend>Mistral</legend>
         <label>KI-Prompt <textarea name="prompt" rows="3" maxlength="3000"></textarea></label>
+        <label><input name="replace_ai_error" type="checkbox"> Bei KI-Fehler Ersatztext drucken</label>
+        <label id="aiErrorTextRow" hidden>Ersatztext bei KI-Fehler
+          <textarea name="ai_error_text" rows="2" maxlength="512" placeholder="Leer lassen, um keinen Fehlertext zu drucken"></textarea>
+        </label>
         <label>Bildversand
           <select name="transfer">
             <option value="direct">Direkt an Mistral</option>
@@ -148,7 +152,8 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
   const form = byId('settingsForm');
   const fields = form.elements;
   const settingNames = [
-    'mode', 'header', 'footer', 'photo_dither', 'photo_protocol', 'prompt', 'transfer', 'api_url', 'api_model',
+    'mode', 'header', 'footer', 'photo_dither', 'photo_protocol', 'prompt', 'replace_ai_error', 'ai_error_text',
+    'transfer', 'api_url', 'api_model',
     'upload_host', 'upload_path', 'dropoff_path', 'logging_enabled', 'guided_mode'
   ];
   let auth = '';
@@ -236,6 +241,7 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
   function setVisibility() {
     byId('printTexts').hidden = fields.mode.value === 'ai_text';
     byId('visionFields').hidden = fields.mode.value === 'photo';
+    byId('aiErrorTextRow').hidden = !fields.replace_ai_error.checked;
   }
 
   function showKeyStatus(configured) {
@@ -262,6 +268,7 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
     byId('settings').scrollIntoView({block:'start'});
   });
   fields.mode.onchange = setVisibility;
+  fields.replace_ai_error.onchange = setVisibility;
   form.onsubmit = event => {
     event.preventDefault();
     if (form.dataset.sdReady !== 'true') return;
