@@ -73,7 +73,8 @@ String CameraSettings::applyJson(JsonVariantConst json) {
     if (!json.is<JsonObjectConst>()) return "Einstellungen muessen ein JSON-Objekt sein.";
     if (!readField(json, "prompt", prompt, 3000, true) ||
         !readField(json, "header", header, 512, true) ||
-        !readField(json, "footer", footer, 512, true)) {
+        !readField(json, "footer", footer, 512, true) ||
+        !readField(json, "ai_error_text", aiErrorText, 512, true)) {
         return "Prompt oder Drucktext ist zu lang oder enthaelt ungueltige Zeichen.";
     }
     if (!readField(json, "api_key", vision.apiKey, 256) ||
@@ -126,6 +127,7 @@ String CameraSettings::applyJson(JsonVariantConst json) {
         else if (value == "dropoff") vision.transfer = ImageTransfer::Dropoff;
         else return "Unbekannter KI-Bildversand.";
     }
+    if (json["replace_ai_error"].is<bool>()) replaceAiError = json["replace_ai_error"].as<bool>();
     if (json["logging_enabled"].is<bool>()) logging = json["logging_enabled"].as<bool>();
     if (json["guided_mode"].is<bool>()) guided = json["guided_mode"].as<bool>();
     return "";
@@ -140,6 +142,8 @@ void CameraSettings::toJson(JsonDocument &doc, bool includeSecrets) const {
     doc["prompt"] = prompt;
     doc["header"] = header;
     doc["footer"] = footer;
+    doc["replace_ai_error"] = replaceAiError;
+    doc["ai_error_text"] = aiErrorText;
     doc["photo_protocol"] = photoProtocol == PhotoProtocol::EscPos ? "esc_pos" : "adafruit";
     switch (photoDither) {
         case PhotoDither::Bayer: doc["photo_dither"] = "bayer"; break;

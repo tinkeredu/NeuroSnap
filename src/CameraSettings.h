@@ -17,6 +17,8 @@ struct CameraSettings {
     String prompt = "Beschreibe dieses Bild.";
     String header;
     String footer;
+    String aiErrorText;
+    bool replaceAiError = false;
     String adminPassword = "neurosnap";
     bool logging = false;
     bool guided = false;
