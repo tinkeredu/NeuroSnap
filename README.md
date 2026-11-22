@@ -74,6 +74,8 @@ Die LED leuchtet blau im Bereitschaftszustand, gelb beim Verarbeiten einer Aufna
 
 Bei fehlgeschlagenem Fotodruck prüfe die Stromversorgung und die Druckerkompatibilität. Kommt die Kamera direkt nach dem WLAN-Start noch nicht per HTTPS ins Netz, warte auf die Zeitsynchronisierung und löse erneut aus. Die Weboberfläche antwortet nach Abschluss eines laufenden Drucks oder Uploads wieder.
 
+Falls sich der Startbeleg wiederholt, verbinde die Kamera per USB und öffne `pio device monitor -b 115200`. Die Zeile `NeuroSnap Start, ESP32-Resetgrund` und die zuletzt protokollierte Startphase helfen, den Neustart einzugrenzen. Bei aktiviertem SD-Logging stehen die Startmeldungen auch in `system.log`.
+
 ## Lizenz
 
 [Creative Commons Namensnennung – Nicht kommerziell – Weitergabe unter gleichen Bedingungen 4.0 International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
