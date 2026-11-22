@@ -39,6 +39,7 @@ String pendingIpReceipt;
 
 struct CaptureJob {
     camera_fb_t *frame = nullptr;
+    TaskHandle_t worker = nullptr;
     CaptureMode mode;
     PhotoProtocol protocol;
     PhotoDither dither;
@@ -48,6 +49,7 @@ struct CaptureJob {
     bool photoReady = true;
 };
 
+std::atomic<CaptureJob *> pendingAiResult{nullptr};
 std::atomic<CaptureJob *> finishedCapture{nullptr};
 
 void setStatus(uint8_t red, uint8_t green, uint8_t blue) {
@@ -149,6 +151,12 @@ void processCapture(CaptureJob &job) {
         job.error = analyzePhoto(job.vision, job.prompt, job.frame->buf, job.frame->len, job.answer);
     }
     esp_camera_fb_return(job.frame);
+    if (useAi) {
+        // Let the loop save the caption before printing can draw power.
+        job.worker = xTaskGetCurrentTaskHandle();
+        pendingAiResult.store(&job);
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    }
 
     if (printPhoto) {
         printText(printer, job.header);
@@ -226,12 +234,16 @@ void capturePhoto() {
 }
 
 void serviceCapture() {
+    if (const auto *result = pendingAiResult.exchange(nullptr)) {
+        sysLog(result->uploadDiagnostics);
+        if (result->error.length()) sysLog(result->error);
+        else saveCaption(result->name, result->prompt, result->answer);
+        xTaskNotifyGive(result->worker);
+    }
+
     std::unique_ptr<CaptureJob> job(finishedCapture.exchange(nullptr));
     if (!job) return;
     captureActive = false;
-    if (job->uploadDiagnostics.length()) sysLog(job->uploadDiagnostics);
-    if (job->error.length()) sysLog(job->error);
-    else if (job->mode != CaptureMode::Photo) saveCaption(job->name, job->prompt, job->answer);
 
     if (!job->photoReady) {
         sysLog("JPEG konnte nicht fuer den Druck aufbereitet werden.");
