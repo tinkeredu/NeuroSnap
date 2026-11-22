@@ -1,5 +1,6 @@
 #pragma once
 
+#include "PhotoDither.h"
 #include "VisionUpload.h"
 #include <ArduinoJson.h>
 
@@ -10,6 +11,7 @@ struct CameraSettings {
     VisionSettings vision;
     CaptureMode mode = CaptureMode::AiText;
     PhotoProtocol photoProtocol = PhotoProtocol::EscPos;
+    PhotoDither photoDither = PhotoDither::Bayer;
     String prompt = "Beschreibe dieses Bild.";
     String header;
     String footer;

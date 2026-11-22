@@ -103,6 +103,14 @@ String CameraSettings::applyJson(JsonVariantConst json) {
         else if (value == "adafruit") photoProtocol = PhotoProtocol::Adafruit;
         else return "Unbekanntes Fotodruck-Protokoll.";
     }
+    if (!json["photo_dither"].isUnbound()) {
+        const String value = json["photo_dither"] | "";
+        if (value == "bayer") photoDither = PhotoDither::Bayer;
+        else if (value == "floyd_steinberg") photoDither = PhotoDither::FloydSteinberg;
+        else if (value == "atkinson") photoDither = PhotoDither::Atkinson;
+        else if (value == "threshold") photoDither = PhotoDither::Threshold;
+        else return "Unbekannte Druckrasterung.";
+    }
     if (!json["transfer"].isUnbound()) {
         const String value = json["transfer"] | "";
         if (value == "direct") vision.transfer = ImageTransfer::Direct;
@@ -124,6 +132,12 @@ void CameraSettings::toJson(JsonDocument &doc, bool includeSecrets) const {
     doc["header"] = header;
     doc["footer"] = footer;
     doc["photo_protocol"] = photoProtocol == PhotoProtocol::EscPos ? "esc_pos" : "adafruit";
+    switch (photoDither) {
+        case PhotoDither::Bayer: doc["photo_dither"] = "bayer"; break;
+        case PhotoDither::FloydSteinberg: doc["photo_dither"] = "floyd_steinberg"; break;
+        case PhotoDither::Atkinson: doc["photo_dither"] = "atkinson"; break;
+        case PhotoDither::Threshold: doc["photo_dither"] = "threshold"; break;
+    }
     doc["api_url"] = vision.apiUrl;
     doc["api_model"] = vision.apiModel;
     doc["transfer"] = vision.transfer == ImageTransfer::Direct ? "direct" : "dropoff";
