@@ -5,6 +5,9 @@
 #include <esp_http_client.h>
 #include <mbedtls/base64.h>
 #include <time.h>
+#include <cerrno>
+#include <memory>
+#include <new>
 
 // Arduino's WiFiClientSecure ships another esp_crt_bundle.h. Use the ESP-IDF
 // function linked with the SDK's built-in CA bundle instead.
@@ -12,7 +15,9 @@ extern "C" esp_err_t esp_crt_bundle_attach(void *conf);
 
 namespace {
 
-constexpr size_t TRANSFER_BLOCK = 768; // A multiple of three so padding occurs only at the end.
+// Fit a TLS record in the ESP32's 5760-byte TCP send buffer.
+constexpr size_t UPLOAD_BLOCK = 4096;
+constexpr size_t BASE64_INPUT_BLOCK = (UPLOAD_BLOCK / 4) * 3; // Padding only in the final block.
 
 class HttpsPost {
 public:
@@ -39,13 +44,30 @@ public:
     }
 
     bool open(size_t length) {
-        return handle && esp_http_client_open(handle, length) == ESP_OK;
+        bodyLength = length;
+        if (!handle) return false;
+        openResult = esp_http_client_open(handle, length);
+        return openResult == ESP_OK;
+    }
+
+    String openError(const char *service) const {
+        if (!handle) return String(service) + ": HTTPS-Client konnte nicht initialisiert werden";
+        return String(service) + ": HTTPS-Verbindung fehlgeschlagen (" +
+               esp_err_to_name(openResult) + ")";
     }
 
     bool write(const uint8_t *data, size_t length) {
         while (length) {
+            errno = 0;
             const int sent = esp_http_client_write(handle, reinterpret_cast<const char *>(data), length);
-            if (sent <= 0) return false;
+            if (sent <= 0) {
+                const int writeErrno = errno;
+                socketError = esp_http_client_get_errno(handle);
+                if (socketError <= 0) socketError = writeErrno;
+                writeResult = sent;
+                return false;
+            }
+            bytesWritten += sent;
             data += sent;
             length -= sent;
         }
@@ -57,14 +79,37 @@ public:
     }
 
     bool writeFile(File &file) {
-        uint8_t buffer[TRANSFER_BLOCK];
         size_t remaining = file.size();
+        if (!remaining) return true;
+        const size_t capacity = min(remaining, UPLOAD_BLOCK);
+        std::unique_ptr<uint8_t[]> buffer(new (std::nothrow) uint8_t[capacity]);
+        if (!buffer) {
+            localWriteError = "Kein Speicher fuer den Upload-Puffer";
+            return false;
+        }
         while (remaining) {
-            const size_t count = file.read(buffer, min(remaining, sizeof(buffer)));
-            if (!count || !write(buffer, count)) return false;
+            const size_t count = file.read(buffer.get(), min(remaining, capacity));
+            if (!count) {
+                localWriteError = "Upload-Datei konnte nicht vollstaendig gelesen werden";
+                return false;
+            }
+            if (!write(buffer.get(), count)) return false;
             remaining -= count;
         }
         return true;
+    }
+
+    String uploadError(const char *service) {
+        if (localWriteError) return String(service) + ": " + localWriteError;
+        const String progress = " (HTTP-Body " + String(bytesWritten) + "/" + String(bodyLength) + " Bytes";
+        // A server can reject the request while the ESP32 is still sending the body.
+        if (esp_http_client_set_timeout_ms(handle, 1500) == ESP_OK &&
+            esp_http_client_fetch_headers(handle) >= 0) {
+            const int status = esp_http_client_get_status_code(handle);
+            if (status >= 300) return String(service) + ": HTTP " + status + " beim Upload" + progress + ")";
+        }
+        return String(service) + ": Upload unvollstaendig" + progress +
+               ", Schreibcode " + String(writeResult) + ", errno " + String(socketError) + ")";
     }
 
     String readResponse(const char *service, String &body, size_t limit) {
@@ -91,6 +136,12 @@ public:
 
 private:
     esp_http_client_handle_t handle = nullptr;
+    esp_err_t openResult = ESP_OK;
+    size_t bodyLength = 0;
+    size_t bytesWritten = 0;
+    int writeResult = 0;
+    int socketError = 0;
+    const char *localWriteError = nullptr;
 };
 
 String checkNetwork() {
@@ -110,15 +161,14 @@ String sendToDropoff(const VisionSettings &settings, const uint8_t *jpeg, size_t
     const String tail = "\r\n--" + boundary + "--\r\n";
     HttpsPost post("https://" + settings.uploadHost + settings.dropoffPath,
                    "multipart/form-data; boundary=" + boundary, 15000);
-    if (!post.open(head.length() + length + tail.length()) || !post.write(head)) {
-        return "Dropoff: HTTPS-Verbindung fehlgeschlagen";
-    }
-    for (size_t offset = 0; offset < length; offset += TRANSFER_BLOCK) {
-        if (!post.write(jpeg + offset, min(TRANSFER_BLOCK, length - offset))) {
-            return "Dropoff: Bild konnte nicht gesendet werden";
+    if (!post.open(head.length() + length + tail.length())) return post.openError("Dropoff");
+    if (!post.write(head)) return post.uploadError("Dropoff");
+    for (size_t offset = 0; offset < length; offset += UPLOAD_BLOCK) {
+        if (!post.write(jpeg + offset, min(UPLOAD_BLOCK, length - offset))) {
+            return post.uploadError("Dropoff");
         }
     }
-    if (!post.write(tail)) return "Dropoff: Upload unvollstaendig";
+    if (!post.write(tail)) return post.uploadError("Dropoff");
     String error = post.readResponse("Dropoff", url, 2048);
     if (error.length()) return error;
     url.trim();
@@ -129,17 +179,19 @@ String sendToDropoff(const VisionSettings &settings, const uint8_t *jpeg, size_t
     return "";
 }
 
-bool sendBase64(HttpsPost &post, const uint8_t *jpeg, size_t length) {
-    uint8_t encoded[4 * (TRANSFER_BLOCK / 3) + 1];
-    for (size_t offset = 0; offset < length; offset += TRANSFER_BLOCK) {
+String sendBase64(HttpsPost &post, const uint8_t *jpeg, size_t length) {
+    // mbedTLS also writes a NUL terminator. Neither it nor the JPEG needs a full base64 copy.
+    std::unique_ptr<uint8_t[]> encoded(new (std::nothrow) uint8_t[UPLOAD_BLOCK + 1]);
+    if (!encoded) return "Mistral: Kein Speicher fuer den Base64-Puffer";
+    for (size_t offset = 0; offset < length; offset += BASE64_INPUT_BLOCK) {
         size_t encodedLength = 0;
-        if (mbedtls_base64_encode(encoded, sizeof(encoded), &encodedLength, jpeg + offset,
-                                  min(TRANSFER_BLOCK, length - offset)) != 0 ||
-            !post.write(encoded, encodedLength)) {
-            return false;
+        if (mbedtls_base64_encode(encoded.get(), UPLOAD_BLOCK + 1, &encodedLength, jpeg + offset,
+                                  min(BASE64_INPUT_BLOCK, length - offset)) != 0) {
+            return "Mistral: Base64-Kodierung fehlgeschlagen";
         }
+        if (!post.write(encoded.get(), encodedLength)) return post.uploadError("Mistral");
     }
-    return true;
+    return "";
 }
 
 } // namespace
@@ -176,12 +228,13 @@ String analyzePhoto(const VisionSettings &settings, const String &prompt,
     const size_t imageLength = direct ? 4 * ((length + 2) / 3) : 0;
 
     HttpsPost post(settings.apiUrl, "application/json", 60000, settings.apiKey);
-    if (!post.open(head.length() + imageLength + tail.length()) || !post.write(head)) {
-        return "Mistral: HTTPS-Verbindung fehlgeschlagen";
+    if (!post.open(head.length() + imageLength + tail.length())) return post.openError("Mistral");
+    if (!post.write(head)) return post.uploadError("Mistral");
+    if (direct) {
+        const String error = sendBase64(post, jpeg, length);
+        if (error.length()) return error;
     }
-    if ((direct && !sendBase64(post, jpeg, length)) || !post.write(tail)) {
-        return "Mistral: Upload unvollstaendig";
-    }
+    if (!post.write(tail)) return post.uploadError("Mistral");
     String body;
     const String error = post.readResponse("Mistral", body, 16384);
     if (error.length()) return error;
@@ -214,11 +267,11 @@ String uploadGalleryPhoto(const VisionSettings &settings, File &photo, File &cap
     HttpsPost post("https://" + settings.uploadHost + settings.uploadPath,
                    "multipart/form-data; boundary=" + boundary, 15000);
     if (!post.open(head.length() + caption.size() + photoHead.length() + photo.size() + tail.length())) {
-        return "Galerie: HTTPS-Verbindung fehlgeschlagen";
+        return post.openError("Galerie");
     }
     if (!post.write(head) || !post.writeFile(caption) || !post.write(photoHead) ||
         !post.writeFile(photo) || !post.write(tail)) {
-        return "Galerie: Upload unvollstaendig";
+        return post.uploadError("Galerie");
     }
     String reply;
     const String error = post.readResponse("Galerie", reply, 2048);
