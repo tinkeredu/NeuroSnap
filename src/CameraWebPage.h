@@ -55,6 +55,16 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
           <option value="ai_text">Nur KI-Text</option>
         </select>
       </label>
+      <label>Bildgröße
+        <select name="photo_resolution" aria-describedby="photoResolutionHint">
+          <option value="auto">Automatisch · 1.600 × 1.200 mit PSRAM</option>
+          <option value="qvga">320 × 240</option>
+          <option value="vga">640 × 480</option>
+          <option value="svga">800 × 600</option>
+          <option value="xga">1.024 × 768</option>
+        </select>
+        <span id="photoResolutionHint" class="muted">Ohne PSRAM maximal 640 × 480. Nach einer Änderung startet die Kamera beim Speichern neu.</span>
+      </label>
       <div id="printTexts">
         <label>Text über dem Foto <textarea name="header" rows="2" maxlength="512"></textarea></label>
         <label>Text unter dem Foto <textarea name="footer" rows="2" maxlength="512"></textarea></label>
@@ -152,7 +162,7 @@ const char CAMERA_WEB_PAGE[] PROGMEM = R"html(
   const form = byId('settingsForm');
   const fields = form.elements;
   const settingNames = [
-    'mode', 'header', 'footer', 'photo_dither', 'photo_protocol', 'prompt', 'replace_ai_error', 'ai_error_text',
+    'mode', 'photo_resolution', 'header', 'footer', 'photo_dither', 'photo_protocol', 'prompt', 'replace_ai_error', 'ai_error_text',
     'transfer', 'api_url', 'api_model',
     'upload_host', 'upload_path', 'dropoff_path', 'logging_enabled', 'guided_mode'
   ];

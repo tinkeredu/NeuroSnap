@@ -42,6 +42,8 @@ Halte die Gerätetaste mindestens zehn Sekunden und lass sie dann los oder klick
 
 ### Mistral und eigener Server
 
+Unter **Einstellungen → Bildgröße** wählst du die Auflösung neuer Aufnahmen. Sie gilt für Upload, SD-Galerie und Fotodruck. **Automatisch** nutzt 1.600 × 1.200 mit PSRAM, sonst 640 × 480. Weitere Optionen sind 320 × 240, 640 × 480, 800 × 600 und 1.024 × 768. Ohne PSRAM ist die Auflösung auf 640 × 480 begrenzt. Zum Testen bei instabiler Verbindung bietet sich 640 × 480 an. Nach einer Änderung im Browser startet die Kamera beim Speichern neu. Auf der SD-Karte heißt die Einstellung `photo_resolution` (`auto`, `qvga`, `vga`, `svga` oder `xga`).
+
 Für die KI-Modi brauchst du Internetzugang und einen [Mistral-API-Schlüssel](https://console.mistral.ai/). Hinterlege ihn unter **Einstellungen → Mistral**. Der Standard-Endpunkt ist `https://api.mistral.ai/v1/chat/completions`, das Standardmodell `mistral-small-latest`. Trage ein Vision-fähiges Modell ein, wenn du den Standard änderst. [Mistral-Dokumentation zu Vision](https://docs.mistral.ai/capabilities/vision/)
 
 Für KI-Aufnahmen werden Foto und Prompt an Mistral gesendet. Die Nutzung dieser Daten zum Modelltraining hängt vom Tarif und den Kontoeinstellungen ab. [Mistral-Datennutzung](https://help.mistral.ai/en/articles/347617-do-you-use-my-user-data-to-train-your-artificial-intelligence-models)

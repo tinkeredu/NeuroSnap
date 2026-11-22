@@ -74,6 +74,17 @@ void sysLog(const String &message) {
     }
 }
 
+framesize_t cameraFrameSize(PhotoResolution resolution, bool hasPsram) {
+    switch (resolution) {
+        case PhotoResolution::Qvga: return FRAMESIZE_QVGA;
+        case PhotoResolution::Vga: return FRAMESIZE_VGA;
+        case PhotoResolution::Svga: return hasPsram ? FRAMESIZE_SVGA : FRAMESIZE_VGA;
+        case PhotoResolution::Xga: return hasPsram ? FRAMESIZE_XGA : FRAMESIZE_VGA;
+        case PhotoResolution::Auto: return hasPsram ? FRAMESIZE_UXGA : FRAMESIZE_VGA;
+    }
+    return FRAMESIZE_VGA;
+}
+
 bool initCamera() {
     camera_config_t config{};
     config.ledc_channel = LEDC_CHANNEL_0;
@@ -90,7 +101,7 @@ bool initCamera() {
     config.pixel_format = PIXFORMAT_JPEG;
 
     const bool hasPsram = psramFound();
-    config.frame_size = hasPsram ? FRAMESIZE_UXGA : FRAMESIZE_VGA;
+    config.frame_size = cameraFrameSize(settings.photoResolution, hasPsram);
     config.jpeg_quality = hasPsram ? 12 : 15;
     config.fb_count = 1;
     config.fb_location = hasPsram ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
@@ -147,7 +158,8 @@ void processCapture(CaptureJob &job) {
     }
     if (useAi) {
         job.uploadDiagnostics = "Vor KI-Upload: JPEG " + String(job.frame->len) +
-                                " Bytes, freier Heap " + String(ESP.getFreeHeap()) +
+                                " Bytes (" + String(job.frame->width) + "x" + String(job.frame->height) +
+                                "), freier Heap " + String(ESP.getFreeHeap()) +
                                 ", groesster Heap-Block " + String(ESP.getMaxAllocHeap()) +
                                 ", freier PSRAM " + String(ESP.getFreePsram());
         job.error = analyzePhoto(job.vision, job.prompt, job.frame->buf, job.frame->len, job.answer);

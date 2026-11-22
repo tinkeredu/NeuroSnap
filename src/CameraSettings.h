@@ -6,12 +6,14 @@
 
 enum class CaptureMode { AiText, Photo, PhotoAi };
 enum class PhotoProtocol { EscPos, Adafruit };
+enum class PhotoResolution { Auto, Qvga, Vga, Svga, Xga };
 
 struct CameraSettings {
     VisionSettings vision;
     CaptureMode mode = CaptureMode::AiText;
     PhotoProtocol photoProtocol = PhotoProtocol::EscPos;
     PhotoDither photoDither = PhotoDither::Bayer;
+    PhotoResolution photoResolution = PhotoResolution::Auto;
     String prompt = "Beschreibe dieses Bild.";
     String header;
     String footer;
