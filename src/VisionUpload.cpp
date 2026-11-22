@@ -17,15 +17,16 @@ extern "C" esp_err_t esp_crt_bundle_attach(void *conf);
 
 namespace {
 
-// Fit a TLS record in the ESP32's 5760-byte TCP send buffer.
-constexpr size_t UPLOAD_BLOCK = 4096;
+// Leave room for queued data in the ESP32's 5760-byte TCP send buffer.
+constexpr size_t UPLOAD_BLOCK = 2048;
 static_assert(UPLOAD_BLOCK <= MBEDTLS_SSL_OUT_CONTENT_LEN, "Upload writes must fit a TLS record");
 constexpr size_t BASE64_INPUT_BLOCK = (UPLOAD_BLOCK / 4) * 3; // Padding only in the final block.
+constexpr int UPLOAD_POLL_TIMEOUT_MS = 15000;
 
 class HttpsPost {
 public:
     HttpsPost(const String &url, const String &contentType, int timeoutMs,
-              const String &apiKey = "") {
+              const String &apiKey = "") : responseTimeoutMs(timeoutMs) {
         esp_http_client_config_t config{};
         config.url = url.c_str();
         config.method = HTTP_METHOD_POST;
@@ -53,7 +54,10 @@ public:
         if (!handle) return false;
         errno = 0;
         openResult = esp_http_client_open(handle, length);
-        if (openResult == ESP_OK) return true;
+        if (openResult == ESP_OK) {
+            esp_http_client_set_timeout_ms(handle, UPLOAD_POLL_TIMEOUT_MS);
+            return true;
+        }
         const int openErrno = errno;
         socketError = esp_http_client_get_errno(handle);
         if (socketError <= 0) socketError = openErrno;
@@ -75,6 +79,7 @@ public:
             // Limit each call to one TLS record so no earlier record in the call can be lost from the byte count.
             const auto *buffer = reinterpret_cast<const char *>(data);
             const size_t count = min(length, UPLOAD_BLOCK);
+            const unsigned long started = millis();
             errno = 0;
             int sent = esp_http_client_write(handle, buffer, count);
             if (sent == MBEDTLS_ERR_SSL_WANT_WRITE) {
@@ -88,9 +93,13 @@ public:
                 socketError = esp_http_client_get_errno(handle);
                 if (socketError <= 0) socketError = writeErrno;
                 writeResult = sent;
+                writeElapsedMs = millis() - started;
+                // ESP-IDF's TLS transport returns zero if its writable poll times out.
+                const bool pollTimeout = sent == 0 && socketError == 0;
+                const bool connectionReset = sent < 0 && socketError == ECONNRESET;
                 // The failed call may have transmitted up to count more bytes.
-                retryableReset = sent < 0 && socketError == ECONNRESET &&
-                                 bytesWritten + count < bodyLength;
+                retryableUpload = (pollTimeout || connectionReset) &&
+                                  bytesWritten + count < bodyLength;
                 return false;
             }
             bytesWritten += sent;
@@ -130,12 +139,14 @@ public:
         return String(service) + ": Upload unvollstaendig (HTTP-Body " +
                String(bytesWritten) + "/" + String(bodyLength) + " Bytes" +
                ", Schreibcode " + String(writeResult) + ", errno " + String(socketError) +
+               ", Schreibdauer " + String(writeElapsedMs) + " ms" +
                ", Schreibwiederholungen " + String(writeRetries) + ")";
     }
 
-    bool canRetryAfterReset() const { return retryableReset; }
+    bool canRetryUpload() const { return retryableUpload; }
 
     String readResponse(const char *service, String &body, size_t limit) {
+        esp_http_client_set_timeout_ms(handle, responseTimeoutMs);
         if (esp_http_client_fetch_headers(handle) < 0) {
             return String(service) + ": keine HTTP-Antwort";
         }
@@ -169,6 +180,7 @@ private:
     }
 
     esp_http_client_handle_t handle = nullptr;
+    const int responseTimeoutMs;
     esp_err_t openResult = ESP_OK;
     esp_err_t tlsResult = ESP_OK;
     int tlsCode = 0;
@@ -176,9 +188,10 @@ private:
     size_t bodyLength = 0;
     size_t bytesWritten = 0;
     size_t writeRetries = 0;
+    unsigned long writeElapsedMs = 0;
     int writeResult = 0;
     int socketError = 0;
-    bool retryableReset = false;
+    bool retryableUpload = false;
     const char *localWriteError = nullptr;
 };
 
@@ -287,7 +300,7 @@ String analyzePhoto(const VisionSettings &settings, const String &prompt,
         if (!post.open(requestLength)) return post.openError("Mistral");
         const String sendError = sendMistralBody(post, head, tail, jpeg, jpegLength);
         if (sendError.length()) {
-            if (retry && post.canRetryAfterReset()) continue;
+            if (retry && post.canRetryUpload()) continue;
             return sendError;
         }
         const String responseError = post.readResponse("Mistral", body, 16384);
