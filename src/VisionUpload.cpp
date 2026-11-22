@@ -5,6 +5,7 @@
 #include <esp_http_client.h>
 #include <esp_tls.h>
 #include <mbedtls/base64.h>
+#include <mbedtls/ssl.h>
 #include <time.h>
 #include <cerrno>
 #include <memory>
@@ -18,6 +19,7 @@ namespace {
 
 // Fit a TLS record in the ESP32's 5760-byte TCP send buffer.
 constexpr size_t UPLOAD_BLOCK = 4096;
+static_assert(UPLOAD_BLOCK <= MBEDTLS_SSL_OUT_CONTENT_LEN, "Upload writes must fit a TLS record");
 constexpr size_t BASE64_INPUT_BLOCK = (UPLOAD_BLOCK / 4) * 3; // Padding only in the final block.
 
 class HttpsPost {
@@ -70,8 +72,17 @@ public:
 
     bool write(const uint8_t *data, size_t length) {
         while (length) {
+            // Limit each call to one TLS record so no earlier record in the call can be lost from the byte count.
+            const auto *buffer = reinterpret_cast<const char *>(data);
+            const size_t count = min(length, UPLOAD_BLOCK);
             errno = 0;
-            const int sent = esp_http_client_write(handle, reinterpret_cast<const char *>(data), length);
+            int sent = esp_http_client_write(handle, buffer, count);
+            if (sent == MBEDTLS_ERR_SSL_WANT_WRITE) {
+                // mbedTLS may still have this record pending and requires identical arguments.
+                ++writeRetries;
+                errno = 0;
+                sent = esp_http_client_write(handle, buffer, count);
+            }
             if (sent <= 0) {
                 const int writeErrno = errno;
                 socketError = esp_http_client_get_errno(handle);
@@ -115,7 +126,8 @@ public:
         if (localWriteError) return String(service) + ": " + localWriteError;
         return String(service) + ": Upload unvollstaendig (HTTP-Body " +
                String(bytesWritten) + "/" + String(bodyLength) + " Bytes" +
-               ", Schreibcode " + String(writeResult) + ", errno " + String(socketError) + ")";
+               ", Schreibcode " + String(writeResult) + ", errno " + String(socketError) +
+               ", Schreibwiederholungen " + String(writeRetries) + ")";
     }
 
     String readResponse(const char *service, String &body, size_t limit) {
@@ -158,6 +170,7 @@ private:
     int tlsCertFlags = 0;
     size_t bodyLength = 0;
     size_t bytesWritten = 0;
+    size_t writeRetries = 0;
     int writeResult = 0;
     int socketError = 0;
     const char *localWriteError = nullptr;
