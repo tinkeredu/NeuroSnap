@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <esp_camera.h>
+#include <esp_system.h>
 
 #include "CameraSettings.h"
 #include "CameraWeb.h"
@@ -27,6 +28,7 @@ bool cameraReady = false;
 bool sdReady = false;
 bool connected = false;
 bool connectingAtBoot = true;
+bool webRunning = false;
 unsigned long connectionStarted;
 uint32_t nextPhotoNumber = 0;
 
@@ -211,14 +213,16 @@ void uploadGallery() {
 void openWifiPortal() {
     connectingAtBoot = false;
     if (wifiManager.getConfigPortalActive()) return;
-    stopCameraWeb();
     // The portal uses the same port as the camera interface.
+    if (webRunning) {
+        stopCameraWeb();
+        webRunning = false;
+    }
     wifiManager.startConfigPortal(SETUP_SSID, "neurosnap");
     if (wifiManager.getConfigPortalActive()) {
         setStatus(0, 255, 255);
         sysLog("WLAN-Setup: NeuroSnap_Setup, http://192.168.4.1");
     } else {
-        beginCameraWeb();
         sysLog("WLAN-Portal konnte nicht gestartet werden.");
     }
 }
@@ -226,12 +230,15 @@ void openWifiPortal() {
 void serviceWifi() {
     if (wifiManager.getConfigPortalActive()) {
         wifiManager.process();
-        if (!wifiManager.getConfigPortalActive()) {
-            beginCameraWeb();
-            readyStatus();
-        }
+        if (!wifiManager.getConfigPortalActive()) readyStatus();
     }
     const bool online = WiFi.status() == WL_CONNECTED;
+    // WebServer opens an lwIP socket. Wait for station bring-up and leave port 80 to the portal.
+    if (online && !wifiManager.getConfigPortalActive() && !webRunning) {
+        sysLog("Starte Webserver.");
+        beginCameraWeb();
+        webRunning = true;
+    }
     if (online && !connected) {
         connectingAtBoot = false;
         WiFi.setSleep(false);
@@ -286,6 +293,27 @@ void setup() {
     printerSerial.begin(9600, SERIAL_8N1, PRINTER_RX_PIN, PRINTER_TX_PIN);
     printer.begin();
     printer.setCodePage(CODEPAGE_CP437);
+
+    const esp_reset_reason_t resetReason = esp_reset_reason();
+    sysLog("NeuroSnap Start, ESP32-Resetgrund: " + String(static_cast<int>(resetReason)));
+    sysLog("Initialisiere Kamera.");
+    cameraReady = initCamera();
+    configureCameraWeb(settings, sdReady, openWifiPortal);
+
+    wifiManager.setDebugOutput(false);
+    wifiManager.setConfigPortalBlocking(false);
+    wifiManager.setConfigPortalTimeout(180);
+    wifiManager.setConnectTimeout(12);
+    wifiManager.setConnectRetries(1);
+    sysLog("Initialisiere WLAN.");
+    if (WiFi.mode(WIFI_STA)) {
+        WiFi.setAutoReconnect(true);
+        WiFi.begin();
+    } else {
+        sysLog("WLAN-Initialisierung fehlgeschlagen. Starte anschliessend das Setup-Portal.");
+    }
+    connectionStarted = millis();
+
     if (settings.guided) {
         if (settings.mode != CaptureMode::Photo) {
             printText(printer, "Die KI-Aufnahmemodi senden Fotos zur Analyse an Mistral AI.");
@@ -294,25 +322,12 @@ void setup() {
         printer.feed(3);
     }
 
-    cameraReady = initCamera();
-    configureCameraWeb(settings, sdReady, openWifiPortal);
-    beginCameraWeb();
-
-    WiFi.mode(WIFI_STA);
-    WiFi.setAutoReconnect(true);
-    wifiManager.setDebugOutput(false);
-    wifiManager.setConfigPortalBlocking(false);
-    wifiManager.setConfigPortalTimeout(180);
-    wifiManager.setConnectTimeout(12);
-    wifiManager.setConnectRetries(1);
-    WiFi.begin();
-    connectionStarted = millis();
     readyStatus();
 }
 
 void loop() {
     serviceWifi();
-    if (!wifiManager.getConfigPortalActive()) serviceCameraWeb();
+    if (webRunning) serviceCameraWeb();
     serviceButton();
     delay(5);
 }
