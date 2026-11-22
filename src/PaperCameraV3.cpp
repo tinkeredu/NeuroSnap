@@ -45,7 +45,9 @@ struct CaptureJob {
     PhotoDither dither;
     VisionSettings vision;
     String name, header, footer, prompt, answer, error;
+    String aiErrorText;
     String uploadDiagnostics;
+    bool replaceAiError = false;
     bool photoReady = true;
 };
 
@@ -158,6 +160,9 @@ void processCapture(CaptureJob &job) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     }
 
+    const String &failureText = job.replaceAiError ? job.aiErrorText : job.error;
+    if (!printPhoto && !job.answer.length() && !failureText.length()) return;
+
     if (printPhoto) {
         printText(printer, job.header);
         if (job.photoReady) {
@@ -177,8 +182,10 @@ void processCapture(CaptureJob &job) {
         printer.println(F("Mistral AI:"));
         printer.boldOff();
         printText(printer, job.answer);
-    } else if (useAi && !printPhoto) {
-        printText(printer, job.error);
+    } else if (useAi && job.error.length() && failureText.length() &&
+               (!printPhoto || job.replaceAiError)) {
+        if (printPhoto) printer.feed(1);
+        printText(printer, failureText);
     }
     if (printPhoto && job.footer.length()) {
         printer.feed(1);
@@ -220,6 +227,8 @@ void capturePhoto() {
         if (job->mode != CaptureMode::Photo) {
             job->vision = settings.vision;
             job->prompt = settings.prompt;
+            job->replaceAiError = settings.replaceAiError;
+            if (job->replaceAiError) job->aiErrorText = settings.aiErrorText;
         }
         captureActive = true;
         // The printer library polls in yield() loops. Keep that work off the Wi-Fi core.
