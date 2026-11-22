@@ -1,76 +1,79 @@
-# PaperCamera AI 📷✨
+# NeuroSnap
 
-Eine Sofortbildkamera basierend auf dem ESP32-S3, die Fotos nicht ausdruckt, sondern sie vorher von einer KI (Mistral) analysieren lässt.
-Das Projekt ist im Rahmen des Unterrichts entstanden und wurde hier dokumentiert: http://www.tinkeredu.de/informatik/ki-und-klimaschutz-widerspruch-oder-werkzeug/
+NeuroSnap ist eine Sofortbildkamera mit ESP32-S3, OV2640 und Thermodrucker. Das Projekt entstand im Informatikunterricht. [Hintergrund zum Unterrichtsprojekt](https://www.tinkeredu.de/informatik/ki-und-klimaschutz-widerspruch-oder-werkzeug/)
 
-![Status](https://img.shields.io/badge/Status-Stable-green) [![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC%20BY--NC--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
+Inspiriert vom [Digital Independence Day](https://di.day/) lässt sich der Übertragungsweg für KI-Aufnahmen auswählen.
 
-## Funktionen
-* **Snapshot & AI:** Macht ein Foto und sendet es an Mistral.
-* **Thermal Print:** Druckt die Beschreibung, einen Witz oder ein Gedicht über das Bild aus.
-* **Smart Feedback:** Eine farbige LED zeigt genau an, was die Kamera gerade macht (oder welcher Fehler vorliegt).
-* **SD-Card Config:** WLAN und API-Keys werden sicher auf der SD-Karte gespeichert, nicht im Code.
-* **Webinterface:** Einstellungen, Logs und Firmware-Updates direkt im Browser.
-* **Geführter Modus:** Der Drucker gibt Hilfestellungen beim Setup und Datenschutzhinweise.
-* **Sicherheit:** Passwortschutz für kritische Funktionen.
+| Aufnahmemodus | Ausdruck | Bildversand beim Auslösen |
+| --- | --- | --- |
+| Sofortbild | Eigener Text oben, Foto, eigener Text unten | Keiner |
+| Sofortbild mit KI | Eigener Text oben, Foto, Mistral-Text, eigener Text unten | An Mistral |
+| Nur KI-Text | Mistral-Text | An Mistral |
 
-Inspiriert von der Initiative **[di.day](https://di.day/)**, vollzieht NeuroSnap mit Version 2 einen wichtigen Schritt in Richtung digitaler Souveränität und KI-Kompetenz. 
+In beiden Sofortbildmodi sind die Texte oben und unten optional. Ist die KI nicht erreichbar, druckt **Sofortbild mit KI** weiterhin das Foto und die eigenen Texte. Die Fotos und verfügbaren KI-Texte erscheinen in der lokalen Galerie, wenn eine SD-Karte eingelegt ist.
 
-Anstatt Daten blind an geschlossene Systeme zu senden, macht dieses Update den Datenfluss transparent und kontrollierbar. Durch die Implementierung eines eigenen "Dropoff"-Servers und die Integration offenerer Modelle (wie Mistral AI) lernen Nutzer nicht nur, wie KI "sieht", sondern auch, wie Daten verarbeitet werden.
+## Hardware
 
+- ESP32-S3 mit 16 MB Flash und Octal-PSRAM, wie in `platformio.ini` konfiguriert. [Beispiel-Kit](https://de.aliexpress.com/item/1005008589091526.html)
+- OV2640-Kamera mit ESP32-S3-EYE-Pinbelegung
+- TTL-Thermodrucker mit 384 Druckpunkten pro Zeile und serieller Verbindung mit 9.600 Baud. [Beispiel-Drucker](https://de.aliexpress.com/item/1005007402905573.html)
+- MicroSD-Karte mit FAT32, empfohlen sind bis zu 16 GB
+- Taster und WS2812B-LED, z. B. an der mitgelieferten Platine
 
-## Hardware-Liste
-1. **ESP32-S3 Board:** z.B. https://de.aliexpress.com/item/1005008589091526.html?spm=a2g0o.order_list.order_list_main.63.5aa75c5fESzsB8&gatewayAdapt=glo2deu 
-2. **Kamera:** OV2640 im Kit enthalten (es bietet sich an, eine Kamera mit langem Kabel zu nutzen, um die Verkabelung zu vereinfachen)
-3. **Thermodrucker:** TTL Serial Printer z.B. https://de.aliexpress.com/item/1005007402905573.html?spm=a2g0o.order_list.order_list_main.125.5aa75c5fESzsB8&gatewayAdapt=glo2deu 
-4. **MicroSD Karte:** Max 16GB empfohlen (FAT32) Ich habe eine Verlängerung genutzt z.B. https://de.aliexpress.com/item/4001200431510.html?spm=a2g0o.order_list.order_list_main.83.5aa75c5fESzsB8&gatewayAdapt=glo2deu
-5. **Button & NeoPixel:** Ein Taster und eine WS2812B LED z.B. https://www.alibaba.com/product-detail/16mm-Stainless-Steel-Waterproof-Wired-Ws2812_1601446043870.html?spm=a2756.order-detail-ta-bn-b.0.0.3e61f19cDmsLW4
+Der Drucker zieht beim Fotodruck deutlich Strom. Im ursprünglichen Aufbau versorgt ihn ein 18650-Akku mit einer Ladeplatine, die 2 A liefern kann.
 
-Ich habe ein PCB erstellt, um den Button und den Drucker leichter verbinden zu können.
+## Installieren und einrichten
 
+1. Setze eine FAT32-formatierte MicroSD-Karte ein. Für eine Neueinrichtung darf sie leer sein.
+2. Baue die Firmware mit [PlatformIO](https://platformio.org/) und flashe den ESP32-S3 per USB.
 
-## Installation
+   ```sh
+   pio run -e esp32-s3-dev -t upload
+   ```
 
-### 1. Webserver (PHP)
-Lade `upload.php` und `dropoff.php` auf deinen Webserver (Ordner z.B. `/neurosnap/`). Stelle sicher, dass der Ordner Schreibrechte hat (`chmod 755`).
+3. Beim ersten Start öffnet die Kamera nach rund zwölf Sekunden den Hotspot **NeuroSnap_Setup** (WLAN-Passwort `neurosnap`). Verbinde dich damit, öffne bei Bedarf `http://192.168.4.1` und wähle unter **Configure WiFi** dein WLAN. Ein Smartphone-Hotspot geht ebenfalls. Die Kamera druckt ihre IP-Adresse, sobald sie im gewählten Netz ist.
+4. Öffne die gedruckte IP-Adresse im Browser aus demselben Netz. Unter **Einstellungen** wählst du den Aufnahmemodus und hinterlegst die Drucktexte. Das Admin-Passwort einer leeren SD-Karte lautet `neurosnap`. Du kannst es dort ändern. Die Geräteoberfläche läuft über lokales HTTP und ist für ein vertrauenswürdiges WLAN vorgesehen.
 
-### 2. Mistral API Key besorgen
-console.mistral.ai
-Achtung: Im kostenlosen Modus werden die hochgeladenen Bilder und prompts für das Training neuer KIs verwendet. Nutzt man die Bezahlversion ist das nicht der Fall. Weitere Informationen dazu wie man das abstellt: https://help.mistral.ai/en/articles/455207-can-i-opt-out-of-my-input-or-output-data-being-used-for-training und https://help.mistral.ai/en/articles/347617-do-you-use-my-user-data-to-train-your-artificial-intelligence-models
+### WLAN wechseln
 
-### 3. SD-Karte (Konfiguration)
-Lade die Dateien aus dem Ordner SD Karte in das Hauptverzeichnis deiner SD Karte. 
-Die Funktionen sind die folgenden:
-`config.txt` 
-```text
-DEIN_MISTRAL_API_KEY
-https://api.mistral.ai/v1/chat/completions
-pixtral-12b-2409
-dein-server.de
-/neurosnap/upload.php
-0 (0=Aus, 1=An für Logging)
-/neurosnap/dropoff.php
-0
+Halte die Gerätetaste mindestens zehn Sekunden und lass sie dann los oder klicke in den Webeinstellungen auf **WLAN-Auswahl öffnen**. Das Portal ist drei Minuten verfügbar. Die Kamera kann im Sofortbildmodus schon während der WLAN-Einrichtung aufnehmen und drucken. Mit bereits gespeichertem Sofortbildmodus funktioniert sie bei späteren Starts auch ohne WLAN.
+
+### Mistral und eigener Server
+
+Für die KI-Modi brauchst du Internetzugang und einen [Mistral-API-Schlüssel](https://console.mistral.ai/). Hinterlege ihn unter **Einstellungen → Mistral**. Der Standard-Endpunkt ist `https://api.mistral.ai/v1/chat/completions`, das Standardmodell `mistral-small-latest`. Trage ein Vision-fähiges Modell ein, wenn du den Standard änderst. [Mistral-Dokumentation zu Vision](https://docs.mistral.ai/capabilities/vision/)
+
+Für KI-Aufnahmen werden Foto und Prompt an Mistral gesendet. Die Nutzung dieser Daten zum Modelltraining hängt vom Tarif und den Kontoeinstellungen ab. [Mistral-Datennutzung](https://help.mistral.ai/en/articles/347617-do-you-use-my-user-data-to-train-your-artificial-intelligence-models)
+
+**Direkt an Mistral** überträgt das JPEG als Base64 im Chat-Request. Der ESP32 erzeugt die Base64-Daten blockweise aus dem Kamerapuffer. Alternativ kannst du **Über eigenen Dropoff-Server** wählen. Dafür muss `Server/dropoff.php` auf einem HTTPS-Webserver erreichbar sein und eine öffentlich abrufbare Bild-URL liefern. Hostname und Pfad sind in den Einstellungen konfigurierbar. Die Kamera wechselt den Uploadweg nur durch deine Auswahl. Beide Wege prüfen das Serverzertifikat und benötigen eine per NTP synchronisierte Uhr.
+
+Für den separat ausgelösten **Galerie-Upload** installiere `Server/upload.php` auf demselben Server und trage seinen Pfad ein. Der PHP-Prozess braucht Schreibrechte im jeweiligen Uploadverzeichnis. Die Kamera überträgt nur Dateien mit erfolgreicher KI-Antwort und löscht ein lokales Paar aus Bild und Text nach Bestätigung durch den Galerie-Server. Reine Sofortbilder bleiben lokal. `Server/gallery.php` zeigt die hochgeladenen Aufnahmen an.
+
+### Einstellungen auf der SD-Karte
+
+Bestehende `config.txt`, `prompt.txt` und `password.txt` werden beim Laden als Altkonfiguration berücksichtigt. Bei einer bestehenden Konfiguration mit API-Schlüssel und eigenem Upload-Host bleibt zunächst Dropoff voreingestellt. Du kannst unter **Bildversand** auf den Direktupload wechseln. Ein vorhandener Modellname bleibt erhalten und lässt sich im Browser ändern.
+
+Beim ersten Speichern im Browser entsteht `settings.json` im Hauptverzeichnis der SD-Karte. Ab dann hat diese Datei Vorrang und kann auch bei ausgeschalteter Kamera direkt auf der SD-Karte bearbeitet werden. Sie enthält den API-Schlüssel und das Admin-Passwort. Als Einstieg für ein Gerät ganz ohne WLAN reicht beispielsweise diese Datei `settings.json`:
+
+```json
+{
+  "mode": "photo",
+  "header": "NeuroSnap",
+  "footer": "Ein Gruß von der Fotobox!"
+}
 ```
-*(Zeile 6 & 8: 0=Aus, 1=An für Logging bzw. Geführten Modus)*
 
-`password.txt` (Admin-Passwort) und `prompt.txt` (KI-Befehl).
+## Bedienung und Fehlersuche
 
-### 4. Hotspot einrichten
-Die Kamera benötigt eine Internetverbindung. Ein Hotspot auf dem Smartphone reicht vollkommen aus. 
+| Taster | Aktion |
+| --- | --- |
+| Unter 2 Sekunden | Foto aufnehmen und je nach Aufnahmemodus drucken |
+| 5 bis unter 10 Sekunden | In einem KI-Modus Bild-Text-Paare zum eigenen Galerie-Server hochladen |
+| Ab 10 Sekunden | WLAN-Portal öffnen |
 
-### 5. Geh raus in die Welt und mache Fotos. Die Fotos werden auch auf der SD Karte gespeichert.
+Die LED leuchtet blau im Bereitschaftszustand, gelb beim Verarbeiten einer Aufnahme, cyan während der WLAN-Einrichtung und lila beim Galerie-Upload. Bei Orange findest du den Netzwerk- oder KI-Fehler auf der seriellen Konsole oder bei aktiviertem SD-Logging im Systemprotokoll. Für die Diagnose protokolliert die Firmware vor der KI-Anfrage die JPEG-Größe, den freien Heap, den größten zusammenhängenden Heap-Block und den freien PSRAM. Rot signalisiert einen Aufnahme- oder Fotodruckfehler.
 
-## 📖 Bedienung
+Bei fehlgeschlagenem Fotodruck prüfe die Stromversorgung und die Druckerkompatibilität. Kommt die Kamera direkt nach dem WLAN-Start noch nicht per HTTPS ins Netz, warte auf die Zeitsynchronisierung und löse erneut aus. Die Weboberfläche antwortet nach Abschluss eines laufenden Drucks oder Uploads wieder.
 
-*   **Kurz drücken:** Foto aufnehmen & analysieren.
-*   **Mittel drücken (5s):** Upload aller Bilder zur Galerie.
-*   **Lang drücken (10s):** WLAN Reset.
+## Lizenz
 
-## Troubeshooting
-Der Drucker benötigt viel Strom, sodass die Versorgung über eine Powerbank (abhängig von der Powerbank) nicht funktioniert. Ich habe eine 18650 Lipo mit einem entsprechenden Ladeboard das 2A bereitstellen kann genutzt.
-
-
-## 📄 Lizenz
-
-Dieses Werk ist lizenziert unter einer **Creative Commons Namensnennung - Nicht-kommerziell - Weitergabe unter gleichen Bedingungen 4.0 International Lizenz** (CC BY-NC-SA 4.0).
+[Creative Commons Namensnennung – Nicht kommerziell – Weitergabe unter gleichen Bedingungen 4.0 International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/)
