@@ -111,6 +111,15 @@ String CameraSettings::applyJson(JsonVariantConst json) {
         else if (value == "threshold") photoDither = PhotoDither::Threshold;
         else return "Unbekannte Druckrasterung.";
     }
+    if (!json["photo_resolution"].isUnbound()) {
+        const String value = json["photo_resolution"] | "";
+        if (value == "auto") photoResolution = PhotoResolution::Auto;
+        else if (value == "qvga") photoResolution = PhotoResolution::Qvga;
+        else if (value == "vga") photoResolution = PhotoResolution::Vga;
+        else if (value == "svga") photoResolution = PhotoResolution::Svga;
+        else if (value == "xga") photoResolution = PhotoResolution::Xga;
+        else return "Unbekannte Bildgroesse.";
+    }
     if (!json["transfer"].isUnbound()) {
         const String value = json["transfer"] | "";
         if (value == "direct") vision.transfer = ImageTransfer::Direct;
@@ -137,6 +146,13 @@ void CameraSettings::toJson(JsonDocument &doc, bool includeSecrets) const {
         case PhotoDither::FloydSteinberg: doc["photo_dither"] = "floyd_steinberg"; break;
         case PhotoDither::Atkinson: doc["photo_dither"] = "atkinson"; break;
         case PhotoDither::Threshold: doc["photo_dither"] = "threshold"; break;
+    }
+    switch (photoResolution) {
+        case PhotoResolution::Auto: doc["photo_resolution"] = "auto"; break;
+        case PhotoResolution::Qvga: doc["photo_resolution"] = "qvga"; break;
+        case PhotoResolution::Vga: doc["photo_resolution"] = "vga"; break;
+        case PhotoResolution::Svga: doc["photo_resolution"] = "svga"; break;
+        case PhotoResolution::Xga: doc["photo_resolution"] = "xga"; break;
     }
     doc["api_url"] = vision.apiUrl;
     doc["api_model"] = vision.apiModel;

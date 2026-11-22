@@ -109,7 +109,7 @@ void configureCameraWeb(CameraSettings &settings, bool sdReady, const bool &capt
         }
         server.send(200, "application/json", body);
     });
-    server.on("/settings", HTTP_POST, [&settings, sdReady] {
+    server.on("/settings", HTTP_POST, [&settings, sdReady, &captureActive] {
         if (!authorize(settings, true)) return;
         if (!sdReady) return server.send(503, TEXT, "Zum Speichern ist eine SD-Karte erforderlich.");
         const String body = server.arg("plain");
@@ -119,9 +119,18 @@ void configureCameraWeb(CameraSettings &settings, bool sdReady, const bool &capt
         CameraSettings updated = settings;
         const String error = updated.applyJson(doc.as<JsonVariantConst>());
         if (error.length()) return server.send(400, TEXT, error);
+        const bool resolutionChanged = updated.photoResolution != settings.photoResolution;
+        if (resolutionChanged && captureActive) {
+            return server.send(409, TEXT, "Warte mit dem Ändern der Bildgröße, bis die Aufnahme abgeschlossen ist.");
+        }
         if (!updated.saveToSD()) return server.send(500, TEXT, "Speichern auf der SD-Karte fehlgeschlagen.");
         settings = updated;
-        server.send(200, TEXT, "Einstellungen gespeichert.");
+        if (resolutionChanged) {
+            server.send(200, TEXT, "Einstellungen gespeichert. Die Kamera startet neu, um die Bildgröße zu übernehmen.");
+            restartAt = millis() + 500;
+        } else {
+            server.send(200, TEXT, "Einstellungen gespeichert.");
+        }
     });
     server.on("/getLog", HTTP_GET, [&settings, sdReady] {
         if (!authorize(settings)) return;
