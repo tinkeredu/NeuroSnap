@@ -99,16 +99,10 @@ public:
         return true;
     }
 
-    String uploadError(const char *service) {
+    String uploadError(const char *service) const {
         if (localWriteError) return String(service) + ": " + localWriteError;
-        const String progress = " (HTTP-Body " + String(bytesWritten) + "/" + String(bodyLength) + " Bytes";
-        // A server can reject the request while the ESP32 is still sending the body.
-        if (esp_http_client_set_timeout_ms(handle, 1500) == ESP_OK &&
-            esp_http_client_fetch_headers(handle) >= 0) {
-            const int status = esp_http_client_get_status_code(handle);
-            if (status >= 300) return String(service) + ": HTTP " + status + " beim Upload" + progress + ")";
-        }
-        return String(service) + ": Upload unvollstaendig" + progress +
+        return String(service) + ": Upload unvollstaendig (HTTP-Body " +
+               String(bytesWritten) + "/" + String(bodyLength) + " Bytes" +
                ", Schreibcode " + String(writeResult) + ", errno " + String(socketError) + ")";
     }
 
